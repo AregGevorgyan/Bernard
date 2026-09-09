@@ -1,0 +1,11 @@
+bin/
+.devdata/
+web/portal/node_modules/
+*.db
+*.db-shm
+*.db-wal
+
+# web/portal/dist is deliberately committed: it is go:embed'ed into the binary,
+# so a bare `go build ./cmd/bernard` works from a fresh clone without Node.
+# Rebuild it with `make portal` whenever you touch web/portal/src.
+web/portal/tsconfig.tsbuildinfo

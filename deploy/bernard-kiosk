@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Launches the TV browser. Kept as a script rather than a long ExecStart so the
+# flags can be edited and the service restarted without touching the unit file.
+set -euo pipefail
+
+URL="${BERNARD_DISPLAY_URL:-http://localhost:8080/display}"
+PROFILE="${HOME}/.bernard-chrome"
+
+# Chromium is a deb on some Ubuntu images and a snap on others; the snap cannot
+# write outside the user's home, which is why the profile lives there.
+CHROME=""
+for candidate in chromium chromium-browser google-chrome-stable google-chrome; do
+  if command -v "$candidate" >/dev/null 2>&1; then CHROME="$candidate"; break; fi
+done
+if [[ -z "$CHROME" ]]; then
+  echo "bernard-kiosk: no chromium found — install it with: sudo apt install -y chromium" >&2
+  exit 1
+fi
+
+mkdir -p "$PROFILE"
+
+# Chromium refuses to start if it thinks it crashed, and a power cut looks
+# exactly like a crash. Clearing these two flags every boot stops the
+# "Restore pages?" bubble from parking on the TV forever.
+if [[ -f "$PROFILE/Default/Preferences" ]]; then
+  sed -i 's/"exit_type":"[^"]*"/"exit_type":"Normal"/; s/"exited_cleanly":false/"exited_cleanly":true/' \
+    "$PROFILE/Default/Preferences" || true
+fi
+
+# Wait for the server to answer before opening the window, so the TV never
+# shows a Chromium error page at boot.
+for _ in $(seq 1 60); do
+  if curl -fsS --max-time 2 "${URL%/display}/healthz" >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+
+exec cage -d -- "$CHROME" \
+  --kiosk "$URL" \
+  --ozone-platform=wayland \
+  --start-fullscreen \
+  --user-data-dir="$PROFILE" \
+  --autoplay-policy=no-user-gesture-required \
+  --noerrdialogs \
+  --disable-infobars \
+  --disable-session-crashed-bubble \
+  --disable-features=Translate,TranslateUI,MediaRouter \
+  --no-first-run \
+  --no-default-browser-check \
+  --check-for-update-interval=31536000 \
+  --disable-pinch \
+  --overscroll-history-navigation=0 \
+  --hide-scrollbars \
+  --enable-features=VaapiVideoDecoder,VaapiVideoDecodeLinuxGL \
+  --ignore-gpu-blocklist \
+  --enable-gpu-rasterization

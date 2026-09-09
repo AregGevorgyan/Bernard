@@ -1,0 +1,53 @@
+# The Bernard server: portal, admin console, playlist API.
+# Install to /etc/systemd/system/bernard.service
+
+[Unit]
+Description=Bernard billboard server
+Documentation=https://github.com/AregGevorgyan/Bernard
+After=network-online.target
+Wants=network-online.target
+# Never give up on a service that crash-loops through a bad config change; a
+# wall-mounted display should keep trying until someone fixes the env file.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=bernard
+Group=bernard
+ExecStart=/usr/local/bin/bernard
+EnvironmentFile=/etc/bernard/bernard.env
+WorkingDirectory=/var/lib/bernard
+
+Restart=always
+RestartSec=3
+
+# Sandbox. Bernard needs its own data directory, the network, and nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/bernard
+
+# ffprobe, used to read a video's real length, lives in /usr/bin.
+# ProtectSystem=strict already leaves that read-only.
+
+[Install]
+WantedBy=multi-user.target

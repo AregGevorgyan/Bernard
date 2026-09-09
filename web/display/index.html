@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Bernard — Display</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden; background: #000; color: #fff;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    /* The TV is a display, not an input device. */
+    cursor: none; user-select: none; -webkit-user-select: none;
+  }
+
+  /* Exactly two layers exist for the lifetime of the page. Slides swap their
+     contents; the DOM never grows. */
+  .layer {
+    position: fixed; inset: 0; opacity: 0;
+    transition: opacity 600ms ease-in-out;
+    display: grid; place-items: center;
+    background: #000;
+    /* Promote to its own compositor layer so the crossfade never repaints
+       the whole frame on the NUC's integrated GPU. */
+    will-change: opacity;
+  }
+  .layer.active { opacity: 1; }
+
+  .layer img, .layer video {
+    max-width: 100%; max-height: 100%; width: 100%; height: 100%;
+    display: none;
+  }
+  .layer.fit-contain img, .layer.fit-contain video { object-fit: contain; }
+  .layer.fit-cover  img, .layer.fit-cover  video { object-fit: cover; }
+  .layer.kind-image img { display: block; }
+  .layer.kind-video video { display: block; }
+
+  .frame-slot { position: absolute; inset: 0; display: none; }
+  .layer.kind-html .frame-slot { display: block; }
+  .frame-slot iframe { width: 100%; height: 100%; border: 0; background: #000; }
+
+  /* Standby: shown when nothing is approved, or before the first fetch. */
+  #standby {
+    position: fixed; inset: 0; display: grid; place-items: center;
+    background: radial-gradient(ellipse at 50% 40%, #12203a 0%, #05070d 70%);
+    opacity: 0; transition: opacity 600ms ease-in-out; pointer-events: none;
+  }
+  #standby.active { opacity: 1; }
+  .standby-inner { text-align: center; padding: 4rem; }
+  .standby-mark {
+    font-size: clamp(3rem, 9vw, 8rem); font-weight: 800; letter-spacing: -0.04em;
+    background: linear-gradient(135deg, #7dd3fc, #a78bfa 60%, #f0abfc);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .standby-sub {
+    margin-top: 1.5rem; font-size: clamp(1rem, 2vw, 1.6rem);
+    color: #94a3b8; font-weight: 500; letter-spacing: 0.01em;
+  }
+  .standby-clock {
+    margin-top: 3rem; font-size: clamp(2rem, 5vw, 4rem); font-weight: 200;
+    color: #cbd5e1; font-variant-numeric: tabular-nums;
+  }
+
+  /* A single dim pip in the corner when the page cannot reach the server.
+     Enough for someone walking past to know, invisible from a distance. */
+  #offline {
+    position: fixed; right: 18px; bottom: 18px; width: 10px; height: 10px;
+    border-radius: 50%; background: #f87171; opacity: 0;
+    transition: opacity 400ms ease; box-shadow: 0 0 12px #f87171;
+  }
+  #offline.show { opacity: 0.75; }
+
+  #debug {
+    position: fixed; left: 14px; top: 14px; display: none;
+    font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: rgba(0,0,0,.75); color: #86efac; padding: 10px 14px;
+    border-radius: 8px; white-space: pre; border: 1px solid #1e293b;
+  }
+  body.debug #debug { display: block; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .layer, #standby { transition-duration: 1ms; }
+  }
+</style>
+</head>
+<body>
+  <div class="layer" id="layer0"><img alt="" /><video muted playsinline preload="auto"></video><div class="frame-slot"></div></div>
+  <div class="layer" id="layer1"><img alt="" /><video muted playsinline preload="auto"></video><div class="frame-slot"></div></div>
+
+  <div id="standby">
+    <div class="standby-inner">
+      <div class="standby-mark">Startup Shell</div>
+      <div class="standby-sub" id="standbySub">Nothing scheduled right now</div>
+      <div class="standby-clock" id="standbyClock"></div>
+    </div>
+  </div>
+
+  <div id="offline" title="cannot reach the server"></div>
+  <div id="debug"></div>
+
+<script>
+"use strict";
+/*
+ * Bernard display client.
+ *
+ * Design rules, all of them chosen because the previous kiosk had to be killed
+ * and relaunched every three hours to stay healthy:
+ *
+ *  1. The DOM is fixed. Two layers, each with one <img> and one <video>, are
+ *     created once and reused forever. Only an HTML slide builds an element,
+ *     and it is torn down explicitly on the way out.
+ *  2. Media elements are actively released. Setting .src = "" is not enough for
+ *     a video; the decoder holds on until load() runs against an empty source.
+ *  3. Every await has a deadline. A slide that cannot decode advances anyway.
+ *  4. Nothing accumulates: no growing arrays, no per-slide listeners, no timers
+ *     left running. Timers are singletons that get cleared before they are set.
+ *  5. The page still reloads itself once a day. Cheap, total, and it happens at
+ *     4am instead of in the middle of the afternoon.
+ */
+
+const DEBUG = new URLSearchParams(location.search).has("debug");
+if (DEBUG) document.body.classList.add("debug");
+
+const PREPARE_TIMEOUT_MS = 8000;   // give up waiting for a decode
+const FADE_MS = 600;               // must match the CSS transition
+const POLL_FALLBACK_MS = 60000;    // re-fetch even if SSE is silent
+const MIN_SLIDE_MS = 1000;
+
+const layers = [
+  buildLayer(document.getElementById("layer0")),
+  buildLayer(document.getElementById("layer1")),
+];
+const standby = document.getElementById("standby");
+const standbySub = document.getElementById("standbySub");
+const standbyClock = document.getElementById("standbyClock");
+const offlinePip = document.getElementById("offline");
+const debugBox = document.getElementById("debug");
+
+let playlist = [];
+let index = 0;
+let front = 0;              // which layer is currently visible
+let slideTimer = null;
+let releaseTimer = null;
+let reloadHour = 4;
+let running = false;
+let generation = 0;         // invalidates in-flight prepares after a reload
+let lastReloadDay = -1;
+let sseState = "connecting";
+
+function buildLayer(root) {
+  return {
+    root,
+    img: root.querySelector("img"),
+    video: root.querySelector("video"),
+    slot: root.querySelector(".frame-slot"),
+    item: null,
+  };
+}
+
+/* ── Fetching ─────────────────────────────────────────────────────────────── */
+
+async function fetchPlaylist() {
+  try {
+    const res = await fetch("/api/playlist", { cache: "no-store" });
+    if (!res.ok) throw new Error("http " + res.status);
+    const data = await res.json();
+    setOffline(false);
+    if (typeof data.reloadHour === "number") reloadHour = data.reloadHour;
+    applyPlaylist(Array.isArray(data.items) ? data.items : []);
+  } catch (err) {
+    // Keep showing whatever is already on screen. A network blip must never
+    // black out the TV.
+    console.warn("playlist fetch failed:", err.message);
+    setOffline(true);
+  }
+}
+
+function applyPlaylist(items) {
+  const sameShape =
+    items.length === playlist.length &&
+    items.every((it, i) => playlist[i] && it.id === playlist[i].id && it.durationMs === playlist[i].durationMs);
+
+  playlist = items;
+
+  if (items.length === 0) {
+    stop();
+    showStandby(true);
+    return;
+  }
+  if (sameShape && running) return;      // nothing to do; do not interrupt a slide
+
+  // Try to stay on the ad that is currently up, so an approval elsewhere in
+  // the list does not visibly restart the rotation.
+  const current = layers[front].item;
+  const keep = current ? items.findIndex((it) => it.id === current.id) : -1;
+
+  showStandby(false);
+  if (keep >= 0 && running) {
+    index = keep;
+    scheduleNext();                      // let the current slide finish
+  } else {
+    index = 0;
+    start();
+  }
+}
+
+/* ── Slide lifecycle ──────────────────────────────────────────────────────── */
+
+function start() {
+  stop();
+  running = true;
+  const gen = ++generation;
+  showSlide(index, gen);
+}
+
+function stop() {
+  running = false;
+  generation++;
+  clearTimeout(slideTimer); slideTimer = null;
+  clearTimeout(releaseTimer); releaseTimer = null;
+  layers.forEach((l) => { l.root.classList.remove("active"); release(l); });
+}
+
+async function showSlide(i, gen) {
+  const item = playlist[i];
+  if (!item) return;
+
+  const back = layers[1 - front];
+  await prepare(back, item);
+  if (gen !== generation) return;        // a reload happened while we waited
+
+  back.root.classList.add("active");
+  const old = layers[front];
+  old.root.classList.remove("active");
+  front = 1 - front;
+
+  if (item.kind === "video") playVideo(back.video);
+
+  // Release the outgoing layer only after the crossfade, or the viewer sees
+  // the old slide vanish mid-fade.
+  clearTimeout(releaseTimer);
+  releaseTimer = setTimeout(() => { if (gen === generation) release(old); }, FADE_MS + 100);
+
+  reportPlay(item.id);
+  scheduleNext();
+  updateDebug();
+}
+
+function scheduleNext() {
+  clearTimeout(slideTimer);
+  const item = playlist[index];
+  const ms = Math.max(MIN_SLIDE_MS, (item && item.durationMs) || 10000);
+  const gen = generation;
+  slideTimer = setTimeout(() => {
+    if (gen !== generation || !running || playlist.length === 0) return;
+    index = (index + 1) % playlist.length;
+    showSlide(index, gen);
+  }, ms);
+}
+
+/* prepare loads a slide into a hidden layer. It always settles: a decode that
+   stalls past PREPARE_TIMEOUT_MS proceeds anyway, so one corrupt file cannot
+   freeze the rotation. */
+function prepare(layer, item) {
+  release(layer);
+  layer.item = item;
+
+  const root = layer.root;
+  root.className = "layer kind-" + item.kind + " fit-" + (item.fit === "cover" ? "cover" : "contain");
+  if (root === layers[front].root) root.classList.add("active");
+  root.style.background = item.background || "#000";
+
+  return withDeadline(new Promise((resolve) => {
+    if (item.kind === "image") {
+      layer.img.onload = layer.img.onerror = () => { layer.img.onload = layer.img.onerror = null; resolve(); };
+      layer.img.src = item.src;
+      // A cached image may already be complete before the handler attaches.
+      if (layer.img.complete && layer.img.naturalWidth > 0) resolve();
+
+    } else if (item.kind === "video") {
+      const v = layer.video;
+      v.oncanplaythrough = v.onerror = () => { v.oncanplaythrough = v.onerror = null; resolve(); };
+      v.loop = false;
+      v.src = item.src;
+      v.load();
+
+    } else if (item.kind === "html") {
+      // Submitter-authored markup runs in a sandboxed iframe with no
+      // same-origin privilege, so it cannot read cookies or call the API.
+      const frame = document.createElement("iframe");
+      frame.setAttribute("sandbox", "allow-scripts");
+      frame.setAttribute("referrerpolicy", "no-referrer");
+      frame.srcdoc = wrapHTML(item.html || "", item.background || "#000");
+      frame.onload = () => resolve();
+      layer.slot.appendChild(frame);
+      layer.frame = frame;
+
+    } else {
+      resolve();
+    }
+  }), PREPARE_TIMEOUT_MS);
+}
+
+/* release returns a layer to a clean state and, critically, frees the video
+   decoder. Assigning "" to video.src leaves the resource attached in Chromium;
+   removeAttribute + load() is what actually lets it go. */
+function release(layer) {
+  layer.item = null;
+
+  layer.img.onload = layer.img.onerror = null;
+  layer.img.removeAttribute("src");
+
+  const v = layer.video;
+  v.oncanplaythrough = v.onerror = null;
+  try { v.pause(); } catch (_) {}
+  v.removeAttribute("src");
+  try { v.load(); } catch (_) {}
+
+  if (layer.frame) {
+    layer.frame.onload = null;
+    try { layer.frame.srcdoc = ""; } catch (_) {}
+    layer.frame.remove();
+    layer.frame = null;
+  }
+  layer.slot.replaceChildren();
+}
+
+function playVideo(v) {
+  // Autoplay is permitted because the element is muted; a rejection is not
+  // fatal, the slide just sits on its first frame until the timer moves on.
+  const p = v.play();
+  if (p && typeof p.catch === "function") p.catch((err) => console.warn("video play:", err.message));
+}
+
+function wrapHTML(body, background) {
+  // The slide author writes fragment markup; this gives it a full-bleed page
+  // with a sane default so a bare <h1> is not 16px in the top-left of a 55".
+  return `<!doctype html><html><head><meta charset="utf-8">
+<style>*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:${background};
+color:#fff;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+display:flex;align-items:center;justify-content:center;text-align:center}</style>
+</head><body>${body}</body></html>`;
+}
+
+function withDeadline(promise, ms) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = () => { if (!settled) { settled = true; clearTimeout(t); resolve(); } };
+    const t = setTimeout(() => {
+      if (!settled) { settled = true; console.warn("slide prepare timed out"); resolve(); }
+    }, ms);
+    promise.then(done, done);
+  });
+}
+
+/* ── Standby ──────────────────────────────────────────────────────────────── */
+
+function showStandby(on) {
+  standby.classList.toggle("active", on);
+  if (on) layers.forEach((l) => l.root.classList.remove("active"));
+}
+
+function tickClock() {
+  standbyClock.textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+/* ── Live updates ─────────────────────────────────────────────────────────── */
+
+function connectEvents() {
+  const es = new EventSource("/api/events");
+
+  es.addEventListener("hello", () => { sseState = "open"; setOffline(false); updateDebug(); });
+  es.addEventListener("playlist", () => { fetchPlaylist(); });
+  es.addEventListener("command", (e) => {
+    let cmd;
+    try { cmd = JSON.parse(e.data).data; } catch (_) { return; }
+    if (cmd === "next") skip(1);
+    else if (cmd === "prev") skip(-1);
+    else if (cmd === "reload") location.reload();
+  });
+
+  es.onopen = () => { sseState = "open"; setOffline(false); updateDebug(); };
+  es.onerror = () => {
+    // EventSource reconnects on its own; we only surface the state.
+    sseState = "reconnecting";
+    setOffline(true);
+    updateDebug();
+  };
+}
+
+function skip(delta) {
+  if (playlist.length === 0) return;
+  clearTimeout(slideTimer);
+  index = (index + delta + playlist.length) % playlist.length;
+  showSlide(index, generation);
+}
+
+function reportPlay(adID) {
+  // Fire and forget; a failed count must never affect playback.
+  fetch("/api/play-event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ adId: adID }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
+function setOffline(on) { offlinePip.classList.toggle("show", on); }
+
+/* ── Housekeeping ─────────────────────────────────────────────────────────── */
+
+function everyMinute() {
+  tickClock();
+  updateDebug();
+
+  const now = new Date();
+  // Daily reload, once, at the configured hour. -1 disables it.
+  if (reloadHour >= 0 && now.getHours() === reloadHour && now.getDate() !== lastReloadDay) {
+    lastReloadDay = now.getDate();
+    console.info("scheduled daily reload");
+    location.reload();
+  }
+}
+
+function updateDebug() {
+  if (!DEBUG) return;
+  const item = playlist[index];
+  debugBox.textContent = [
+    "slide   " + (playlist.length ? index + 1 + "/" + playlist.length : "—"),
+    "id      " + (item ? item.id : "—"),
+    "kind    " + (item ? item.kind + " " + item.durationMs + "ms" : "—"),
+    "front   layer" + front,
+    "sse     " + sseState,
+    "uptime  " + Math.floor(performance.now() / 1000) + "s",
+  ].join("\n");
+}
+
+// Local troubleshooting at the TV with a keyboard plugged in.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight") skip(1);
+  else if (e.key === "ArrowLeft") skip(-1);
+  else if (e.key === "r") location.reload();
+  else if (e.key === "d") document.body.classList.toggle("debug");
+});
+
+// Chromium throttles timers in a hidden tab, which on a TV means a slide can
+// freeze if the compositor decides the page is not visible. Re-sync on wake.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && running) scheduleNext();
+});
+
+tickClock();
+showStandby(true);
+standbySub.textContent = "Connecting…";
+fetchPlaylist().then(() => { standbySub.textContent = "Nothing scheduled right now"; });
+connectEvents();
+setInterval(everyMinute, 60000);
+setInterval(fetchPlaylist, POLL_FALLBACK_MS);
+</script>
+</body>
+</html>

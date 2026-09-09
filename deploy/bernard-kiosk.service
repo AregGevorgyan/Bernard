@@ -1,0 +1,43 @@
+# The TV side: a Wayland kiosk compositor running one Chromium window on the
+# HDMI output, pointed at the display page.
+#
+# PAMName=login is what gives this service a logind session and therefore
+# access to seat0 — the GPU and the display. Without it cage cannot open DRM.
+#
+# Install to /etc/systemd/system/bernard-kiosk.service
+
+[Unit]
+Description=Bernard TV kiosk
+After=systemd-user-sessions.service bernard.service
+Wants=bernard.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=kiosk
+Group=kiosk
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=XDG_SESSION_TYPE=wayland
+Environment=HOME=/home/kiosk
+ExecStart=/usr/local/bin/bernard-kiosk
+
+Restart=always
+RestartSec=5
+
+# Chromium needs its own namespaces for the renderer sandbox, so this unit is
+# deliberately far less confined than bernard.service.
+[Install]
+WantedBy=graphical.target

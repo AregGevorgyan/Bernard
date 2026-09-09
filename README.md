@@ -23,10 +23,15 @@ the playlist. The TV is a Chromium window in a Wayland kiosk pointed at
 
 ## Why this is a rewrite and not a port
 
-It replaces [ShellNews-Bernard](https://github.com/exoad/ShellNews-Bernard),
-which was a Wails desktop app with a Go launcher supervising it. Four things in
-that design were load-bearing problems, and each one is gone here rather than
-carried across:
+It replaces [ShellNews-Bernard](https://github.com/exoad/ShellNews-Bernard) by
+[Jack Meng (exoad)](https://exoad.net/), which was a Wails desktop app with a Go
+launcher supervising it. That build is where the whole idea came from — members
+submit, an organizer approves, the TV rotates — and this one keeps that model,
+the review pipeline and the ad settings almost unchanged. What changed is the
+platform: it was written for Windows, and the NUC runs Ubuntu Server.
+
+Four things in the old design were load-bearing problems, and each one is gone
+here rather than carried across:
 
 | Old | Now |
 | --- | --- |
@@ -116,3 +121,9 @@ The ones that matter:
 - **Backups** are one file: `/var/lib/bernard/bernard.db`, plus the `media/`
   directory beside it.
 - `journalctl -u bernard -f` and `journalctl -u bernard-kiosk -f`.
+
+## Credits
+
+The original Bernard was built by [Jack Meng](https://exoad.net/) — [exoad/ShellNews-Bernard](https://github.com/exoad/ShellNews-Bernard).
+The submission-and-approval flow, the ad settings and the name are all his; this
+is a Linux rewrite of his idea, not a new one.

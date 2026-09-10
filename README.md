@@ -120,6 +120,21 @@ The ones that matter:
   sleep timer.
 - **Backups** are one file: `/var/lib/bernard/bernard.db`, plus the `media/`
   directory beside it.
+- **Boot time is worth checking** with `systemd-analyze blame`. A NIC that is
+  configured but unplugged makes `systemd-networkd-wait-online` burn its full
+  120-second timeout, and since the kiosk starts at `graphical.target` the TV
+  stays black for all of it. Either mark the unused interface `optional: true`
+  in netplan, or drop in an override:
+
+  ```ini
+  # /etc/systemd/system/systemd-networkd-wait-online.service.d/any-link.conf
+  [Service]
+  ExecStart=
+  ExecStart=/lib/systemd/systemd-networkd-wait-online --any -o routable --timeout=20
+  ```
+
+  `install.sh` deliberately does not do this for you — it is a system-wide
+  network policy, and a server install may legitimately want to wait.
 - `journalctl -u bernard -f` and `journalctl -u bernard-kiosk -f`.
 
 ## Credits

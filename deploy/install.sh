@@ -28,12 +28,34 @@ echo "==> Packages"
 apt-get update -qq
 PACKAGES=(ca-certificates curl ffmpeg)
 if $KIOSK; then
-  # cage is the Wayland kiosk compositor; the va-driver packages give Chromium
+  # cage is the Wayland kiosk compositor. The VA-API driver gives Chromium
   # hardware video decoding on Intel graphics, without which 1080p h264 will
-  # peg the NUC's CPU and drop frames.
-  PACKAGES+=(cage chromium seatd
-             mesa-va-drivers intel-media-va-driver-non-free vainfo
+  # peg the CPU and drop frames.
+  PACKAGES+=(cage seatd intel-media-va-driver-non-free vainfo
              fonts-liberation fonts-noto-color-emoji)
+
+  # Chromium's package name has moved around: "chromium" on Debian and older
+  # Ubuntu, "chromium-browser" on current Ubuntu (where it is a transitional
+  # package that installs the snap). Take whichever this release actually has.
+  CHROMIUM_PKG=""
+  for candidate in chromium chromium-browser; do
+    if [[ -n "$(apt-cache policy "$candidate" 2>/dev/null | awk '/Candidate:/ {print $2}' | grep -v '(none)')" ]]; then
+      CHROMIUM_PKG="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$CHROMIUM_PKG" ]]; then
+    echo "No chromium package found in apt. Install a Chromium or Chrome build by hand, then re-run." >&2
+    exit 1
+  fi
+  PACKAGES+=("$CHROMIUM_PKG")
+  echo "    chromium package: $CHROMIUM_PKG"
+
+  # mesa-va-drivers was dropped in Ubuntu 26.04; on releases that still carry
+  # it, it fills in for non-Intel GPUs.
+  if [[ -n "$(apt-cache policy mesa-va-drivers 2>/dev/null | awk '/Candidate:/ {print $2}' | grep -v '(none)')" ]]; then
+    PACKAGES+=(mesa-va-drivers)
+  fi
 fi
 DEBIAN_FRONTEND=noninteractive apt-get install -y "${PACKAGES[@]}"
 

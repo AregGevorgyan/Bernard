@@ -4,7 +4,18 @@
 set -euo pipefail
 
 URL="${BERNARD_DISPLAY_URL:-http://localhost:8080/display}"
-PROFILE="${HOME}/.bernard-chrome"
+# Deliberately NOT a dotted directory. On Ubuntu, Chromium is a snap, and
+# snapd's "home" interface grants access to non-hidden paths in $HOME only —
+# a profile under ~/.something fails with "Permission denied" on SingletonLock.
+PROFILE="${HOME}/bernard-chrome"
+
+# Normally pam_systemd exports this. Fall back to the current user's own
+# runtime dir so the script also works when run by hand for debugging.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [[ ! -w "$XDG_RUNTIME_DIR" ]]; then
+  echo "bernard-kiosk: XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR is not writable by $(id -un)" >&2
+  exit 1
+fi
 
 # Chromium is a deb on some Ubuntu images and a snap on others; the snap cannot
 # write outside the user's home, which is why the profile lives there.

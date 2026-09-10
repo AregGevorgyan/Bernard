@@ -4,8 +4,13 @@
 [Unit]
 Description=Bernard billboard server
 Documentation=https://github.com/AregGevorgyan/Bernard
-After=network-online.target
-Wants=network-online.target
+# Deliberately network.target, not network-online.target. Bernard binds a
+# listening socket, which succeeds before any interface is configured, and its
+# only outbound call (fetching Google's signing keys) happens lazily on the
+# first sign-in. Depending on network-online drags systemd-networkd-wait-online
+# into the boot path, and on a host with a configured-but-unplugged NIC that
+# stalls the whole boot — including the TV — for its 120-second timeout.
+After=network.target
 # Never give up on a service that crash-loops through a bad config change; a
 # wall-mounted display should keep trying until someone fixes the env file.
 StartLimitIntervalSec=0

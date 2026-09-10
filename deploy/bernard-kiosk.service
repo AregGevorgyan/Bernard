@@ -29,7 +29,12 @@ StandardError=journal
 UtmpIdentifier=tty1
 UtmpMode=user
 
-Environment=XDG_RUNTIME_DIR=/run/user/%U
+# XDG_RUNTIME_DIR is deliberately NOT set here. pam_systemd creates
+# /run/user/<uid> for the session opened by PAMName=login and exports the
+# variable into this service's environment. Setting it by hand with %U is the
+# trap: that specifier is the UID of the service *manager* — 0 for a system
+# unit — so it would point at root's runtime dir, which the kiosk user cannot
+# write, and cage would fail to open its Wayland socket.
 Environment=XDG_SESSION_TYPE=wayland
 Environment=HOME=/home/kiosk
 ExecStart=/usr/local/bin/bernard-kiosk

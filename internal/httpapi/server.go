@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -91,7 +92,7 @@ func (s *Server) routes() http.Handler {
 	// ── Portal SPA (everything else) ──────────────────────────────────────────
 	mux.Handle("GET /", s.spaHandler())
 
-	return securityHeaders(logRequests(mux))
+	return securityHeaders(s.logRequests(mux))
 }
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
@@ -148,7 +149,32 @@ func (s *Server) isAdmin(sess *store.Session) bool {
 	return s.cfg.IsAdmin(sess.Email)
 }
 
-func logRequests(next http.Handler) http.Handler {
+// clientIP returns the address a request came from.
+//
+// Behind cloudflared every connection arrives from 127.0.0.1, so the real
+// address is only available in X-Forwarded-For. That header is trivially
+// forged by anyone talking to the port directly, which is why it is read only
+// when BERNARD_TRUST_PROXY says something trustworthy sets it. The leftmost
+// entry is the original client; the rest are the proxy chain.
+func (s *Server) clientIP(r *http.Request) string {
+	if s.cfg.TrustProxy {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if i := strings.IndexByte(xff, ','); i >= 0 {
+				xff = xff[:i]
+			}
+			if ip := strings.TrimSpace(xff); ip != "" {
+				return ip
+			}
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The SSE stream is long-lived and the display polls media constantly;
 		// logging those at info level would bury everything useful.
@@ -161,7 +187,8 @@ func logRequests(next http.Handler) http.Handler {
 		}
 		slog.Info("http",
 			"method", r.Method, "path", r.URL.Path,
-			"status", rec.status, "dur", time.Since(start).Round(time.Millisecond))
+			"status", rec.status, "dur", time.Since(start).Round(time.Millisecond),
+			"ip", s.clientIP(r))
 	})
 }
 

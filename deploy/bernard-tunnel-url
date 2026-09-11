@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Pull the hostname cloudflared just announced out of the journal and park it
+# somewhere readable. A quick tunnel prints its URL once, at startup, and that
+# URL is different every time the service restarts.
+set -uo pipefail
+
+OUT=/var/lib/bernard-tunnel/url
+
+for _ in $(seq 1 30); do
+  url=$(journalctl -u bernard-tunnel.service --since "-2 min" --no-pager -o cat 2>/dev/null \
+        | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1)
+  if [[ -n "$url" ]]; then
+    echo "$url" > "$OUT"
+    logger -t bernard-tunnel "public URL: $url"
+    exit 0
+  fi
+  sleep 2
+done
+
+logger -t bernard-tunnel "could not determine the tunnel URL from the journal"
+exit 0   # never block the tunnel itself from running

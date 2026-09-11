@@ -1,5 +1,34 @@
 # Putting the portal on the internet
 
+## Quick tunnel — no Cloudflare account needed
+
+Useful when you do not yet have access to the account that holds your zone.
+`cloudflared tunnel --url http://localhost:8080` returns a random
+`*.trycloudflare.com` hostname with no login, no DNS record and no inbound
+firewall rule. `deploy/bernard-tunnel.service` runs that as a service, and
+`bernard-tunnel-url` records the assigned address:
+
+```bash
+sudo install -m 755 deploy/bernard-tunnel-url /usr/local/bin/
+sudo install -m 644 deploy/bernard-tunnel.service /etc/systemd/system/
+sudo useradd --system --home /var/lib/bernard-tunnel --shell /usr/sbin/nologin cloudflared
+sudo usermod -aG systemd-journal cloudflared
+sudo systemctl enable --now bernard-tunnel
+cat /var/lib/bernard-tunnel/url
+```
+
+**The hostname changes every time the service restarts**, so it is for trying
+things out, not an address to hand around. Two consequences worth knowing: the
+URL is different after every reboot, and `BERNARD_PUBLIC_URL` in the env file
+goes stale — which is harmless, because all that setting does is decide whether
+the session cookie carries `Secure`, and any `https://` value does that.
+
+Set `BERNARD_TRUST_PROXY=true` alongside it. Behind cloudflared every request
+arrives from 127.0.0.1, and that setting is what lets Bernard read the real
+client address out of `X-Forwarded-For` for its logs.
+
+## Named tunnel — a stable hostname
+
 The NUC sits behind campus NAT, so nothing can reach it from outside. A
 Cloudflare Tunnel solves that without a public IP, an inbound firewall rule, or
 a port forward: `cloudflared` makes an outbound connection to Cloudflare and

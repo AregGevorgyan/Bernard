@@ -125,7 +125,7 @@ func (s *Server) handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.google.Verify(r.Context(), body.Credential)
 	if err != nil {
-		slog.Warn("rejected google sign-in", "err", err)
+		slog.Warn("rejected google sign-in", "err", err, "ip", s.clientIP(r))
 		writeError(w, http.StatusUnauthorized, "could not verify that Google account")
 		return
 	}
@@ -172,7 +172,7 @@ func (s *Server) finishLogin(w http.ResponseWriter, r *http.Request, id auth.Ide
 		writeError(w, http.StatusInternalServerError, "could not start a session")
 		return
 	}
-	slog.Info("sign-in", "email", id.Email, "admin", isAdmin)
+	slog.Info("sign-in", "email", id.Email, "admin", isAdmin, "ip", s.clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"email": id.Email, "name": id.Name, "isAdmin": isAdmin,
 	})
@@ -337,7 +337,7 @@ func (s *Server) handleCreateSubmission(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "could not save your submission")
 		return
 	}
-	slog.Info("submission", "id", ad.ID, "by", sess.Email, "kind", ad.Kind, "bytes", ad.Bytes)
+	slog.Info("submission", "id", ad.ID, "by", sess.Email, "kind", ad.Kind, "bytes", ad.Bytes, "ip", s.clientIP(r))
 	writeJSON(w, http.StatusCreated, ad)
 }
 

@@ -312,3 +312,29 @@ func TestUnknownAPIPathIs404JSON(t *testing.T) {
 		t.Errorf("GET /admin: got %d, want the portal", rec.Code)
 	}
 }
+
+// X-Forwarded-For is attacker-controlled unless something trusted overwrites
+// it, so it must be ignored until BERNARD_TRUST_PROXY says otherwise.
+func TestClientIPHonoursTrustProxy(t *testing.T) {
+	h := newHarness(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.RemoteAddr = "10.0.0.5:41234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9, 70.41.3.18")
+
+	h.server.cfg.TrustProxy = false
+	if got := h.server.clientIP(req); got != "10.0.0.5" {
+		t.Errorf("untrusted proxy: got %q, want the socket address 10.0.0.5", got)
+	}
+
+	h.server.cfg.TrustProxy = true
+	if got := h.server.clientIP(req); got != "203.0.113.9" {
+		t.Errorf("trusted proxy: got %q, want the leftmost forwarded address", got)
+	}
+
+	// With the header absent the socket address stands either way.
+	req.Header.Del("X-Forwarded-For")
+	if got := h.server.clientIP(req); got != "10.0.0.5" {
+		t.Errorf("no header: got %q, want 10.0.0.5", got)
+	}
+}

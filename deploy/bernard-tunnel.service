@@ -1,0 +1,44 @@
+# A Cloudflare "quick tunnel": a public https URL for the portal with no
+# Cloudflare account, no DNS record and no inbound firewall rule.
+#
+# The catch is that the hostname is random and CHANGES EVERY RESTART, so it is
+# for trying things out and showing people — not an address to hand around. The
+# permanent setup is a named tunnel on a zone you control; see cloudflared.md.
+#
+# ExecStartPost records the assigned URL so it can be read back without digging
+# through the journal:  cat /var/lib/bernard/tunnel-url
+#
+# Install to /etc/systemd/system/bernard-tunnel.service
+
+[Unit]
+Description=Bernard quick tunnel (temporary public URL)
+After=network.target bernard.service
+Wants=bernard.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate --url http://localhost:8080
+ExecStartPost=/usr/local/bin/bernard-tunnel-url
+
+Restart=always
+RestartSec=5
+
+User=cloudflared
+Group=cloudflared
+RuntimeDirectory=cloudflared
+StateDirectory=bernard-tunnel
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/bernard-tunnel
+
+[Install]
+WantedBy=multi-user.target

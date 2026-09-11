@@ -118,6 +118,13 @@ The ones that matter:
 - **HDMI-CEC** (turning the TV on and off on a schedule) needs a Pulse-Eight
   adapter — Intel NUCs do not expose CEC over HDMI. Until then, use the TV's own
   sleep timer.
+- **A cursor parked in the middle of the screen** is almost always a USB
+  keyboard whose multimedia-key interface advertises relative axes; libinput
+  reads those bits directly and hands the device `pointer` capability, so the
+  compositor draws a cursor on a machine with no mouse. Nothing moves it, so the
+  browser never gets a pointer-enter event and the page's `cursor: none` never
+  applies. Check with `libinput list-devices | grep -B2 pointer`;
+  `deploy/ignore-phantom-pointers.py` writes the udev rule that drops it.
 - **Backups** are one file: `/var/lib/bernard/bernard.db`, plus the `media/`
   directory beside it.
 - **Boot time is worth checking** with `systemd-analyze blame`. A NIC that is

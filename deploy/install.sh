@@ -32,7 +32,7 @@ if $KIOSK; then
   # hardware video decoding on Intel graphics, without which 1080p h264 will
   # peg the CPU and drop frames.
   PACKAGES+=(cage seatd intel-media-va-driver-non-free vainfo
-             fonts-liberation fonts-noto-color-emoji)
+             libinput-tools fonts-liberation fonts-noto-color-emoji)
 
   # Chromium's package name has moved around: "chromium" on Debian and older
   # Ubuntu, "chromium-browser" on current Ubuntu (where it is a transitional
@@ -83,6 +83,15 @@ if $KIOSK; then
   id -u kiosk &>/dev/null || useradd --create-home --shell /bin/bash kiosk
   # seat access is what lets cage open the GPU and the HDMI output.
   usermod -aG video,render,input,seat kiosk 2>/dev/null || usermod -aG video,render,input kiosk
+  echo "==> Cursor"
+  # Two layers, because a TV should never show a pointer:
+  #   1. Drop the phantom pointer capability that many USB keyboards advertise
+  #      on their multimedia-key interface. That is the usual culprit, and it is
+  #      the only one that removes the cursor outright.
+  #   2. A fully transparent cursor theme, in case a real pointer ever shows up.
+  python3 "$REPO/deploy/ignore-phantom-pointers.py" || true
+  python3 "$REPO/deploy/make-blank-cursor.py" /usr/share/icons/blank
+
   install -o root -g root -m 755 "$REPO/deploy/bernard-kiosk" /usr/local/bin/bernard-kiosk
   install -o root -g root -m 644 "$REPO/deploy/bernard-kiosk.service" /etc/systemd/system/bernard-kiosk.service
   systemctl enable seatd 2>/dev/null || true

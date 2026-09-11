@@ -37,6 +37,13 @@ UtmpMode=user
 # write, and cage would fail to open its Wayland socket.
 Environment=XDG_SESSION_TYPE=wayland
 Environment=HOME=/home/kiosk
+# A TV has no pointer, but plenty of USB keyboards expose a second HID
+# interface that claims one, and cage then parks the default arrow in the middle
+# of the screen. The page's `cursor: none` never applies, because with no mouse
+# the pointer never moves and the browser never sees a pointer-enter event.
+# This theme's shapes are all a 1x1 transparent pixel; install.sh writes it.
+Environment=XCURSOR_THEME=blank
+Environment=XCURSOR_SIZE=24
 ExecStart=/usr/local/bin/bernard-kiosk
 
 Restart=always

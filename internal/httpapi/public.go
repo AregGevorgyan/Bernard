@@ -129,9 +129,10 @@ func (s *Server) handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "could not verify that Google account")
 		return
 	}
-	if !s.cfg.DomainAllowed(id.Email) {
+	if !s.cfg.DomainAllowed(id.Email) || !s.cfg.WorkspaceAllowed(id.HostedDomain) {
+		slog.Warn("sign-in refused", "email", id.Email, "hd", id.HostedDomain, "ip", s.clientIP(r))
 		writeError(w, http.StatusForbidden,
-			"this site is limited to "+strings.Join(s.cfg.AllowedDomains, ", ")+" accounts")
+			"Use your "+strings.Join(s.cfg.AllowedDomains, " or ")+" account to sign in.")
 		return
 	}
 	s.finishLogin(w, r, *id)

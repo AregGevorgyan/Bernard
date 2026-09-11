@@ -24,6 +24,10 @@ var googleIssuers = []string{"accounts.google.com", "https://accounts.google.com
 type Identity struct {
 	Email string
 	Name  string
+	// HostedDomain is Google's `hd` claim: the Workspace domain the account
+	// belongs to. It is empty for a personal gmail.com account, which is what
+	// makes it a stronger signal than the email suffix alone.
+	HostedDomain string
 }
 
 // GoogleVerifier validates Google Identity Services ID tokens locally, against
@@ -58,6 +62,7 @@ func (v *GoogleVerifier) Verify(ctx context.Context, rawToken string) (*Identity
 		Email         string `json:"email"`
 		EmailVerified any    `json:"email_verified"` // Google has sent both bool and string
 		Name          string `json:"name"`
+		HostedDomain  string `json:"hd"`
 	}
 
 	parser := jwt.NewParser(
@@ -98,7 +103,11 @@ func (v *GoogleVerifier) Verify(ctx context.Context, rawToken string) (*Identity
 	if name == "" {
 		name = email
 	}
-	return &Identity{Email: email, Name: name}, nil
+	return &Identity{
+		Email:        email,
+		Name:         name,
+		HostedDomain: strings.ToLower(strings.TrimSpace(claims.HostedDomain)),
+	}, nil
 }
 
 func truthy(v any) bool {

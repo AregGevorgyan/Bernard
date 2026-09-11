@@ -32,8 +32,8 @@ function Header() {
   return (
     <header className="header">
       <div className="brand">
-        <span className="brand-mark">Bernard</span>
-        <span className="brand-sub">Startup Shell billboard</span>
+        <img className="brand-logo" src="/startup-shell-logo.svg" alt="Startup Shell" />
+        <span className="brand-sub">Billboard</span>
       </div>
       <nav className="nav">
         <Link className={pathname === "/" ? "tab active" : "tab"} to="/">Submit</Link>
@@ -76,7 +76,7 @@ function SignIn() {
   return (
     <div className="signin">
       <div className="signin-card">
-        <div className="signin-mark">Bernard</div>
+        <img className="signin-logo" src="/startup-shell-logo.svg" alt="Startup Shell" />
         <p className="signin-lede">
           Put something on the Shell TV. Sign in, upload it, an organizer approves it.
         </p>
@@ -110,7 +110,7 @@ function SignIn() {
 
         {domains.length > 0 && (
           <p className="muted small signin-domains">
-            Open to {domains.map((d) => `@${d}`).join(" and ")} accounts.
+            Sign in with your {domains.map((d) => `@${d}`).join(" or ")} account.
           </p>
         )}
         {error && <p className="error">{error}</p>}

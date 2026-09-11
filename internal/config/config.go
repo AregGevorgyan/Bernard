@@ -24,6 +24,11 @@ type Config struct {
 	AdminEmails    []string // exact addresses granted the admin console
 	DevPassword    string
 
+	// RequireWorkspace rejects any Google account without an `hd` claim
+	// matching AllowedDomains. With it on, a personal gmail.com account cannot
+	// get in even if someone adds gmail.com to the domain list by mistake.
+	RequireWorkspace bool
+
 	MaxUploadBytes    int64
 	DefaultDurationMs int
 	MaxDurationMs     int
@@ -50,6 +55,25 @@ func (c *Config) IsAdmin(email string) bool {
 	email = strings.ToLower(strings.TrimSpace(email))
 	for _, a := range c.AdminEmails {
 		if a == email {
+			return true
+		}
+	}
+	return false
+}
+
+// WorkspaceAllowed reports whether a Google `hd` claim satisfies the policy.
+// With RequireWorkspace off it always passes, so personal-account installs
+// keep working.
+func (c *Config) WorkspaceAllowed(hostedDomain string) bool {
+	if !c.RequireWorkspace {
+		return true
+	}
+	hostedDomain = strings.ToLower(strings.TrimSpace(hostedDomain))
+	if hostedDomain == "" {
+		return false // not a Workspace account at all
+	}
+	for _, d := range c.AllowedDomains {
+		if hostedDomain == d {
 			return true
 		}
 	}
@@ -84,6 +108,7 @@ func Load() (*Config, error) {
 		AllowedDomains:    csvLower(env("BERNARD_ALLOWED_DOMAINS", "")),
 		AdminEmails:       csvLower(env("BERNARD_ADMIN_EMAILS", "")),
 		DevPassword:       env("BERNARD_DEV_PASSWORD", ""),
+		RequireWorkspace:  envBool("BERNARD_REQUIRE_WORKSPACE", false),
 		MaxUploadBytes:    envInt64("BERNARD_MAX_UPLOAD_BYTES", 256<<20),
 		DefaultDurationMs: envInt("BERNARD_DEFAULT_DURATION_MS", 10000),
 		MaxDurationMs:     envInt("BERNARD_MAX_DURATION_MS", 120000),

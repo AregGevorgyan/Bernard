@@ -91,7 +91,8 @@ The ones that matter:
 | --- | --- |
 | `BERNARD_GOOGLE_CLIENT_ID` | Google OAuth web client ID. Its absence is what enables password mode. |
 | `BERNARD_ALLOWED_DOMAINS` | Email domains allowed to submit. Empty means any Google account. |
-| `BERNARD_ADMIN_EMAILS` | Exact addresses allowed to approve. |
+| `BERNARD_REQUIRE_WORKSPACE` | Require a Workspace account in one of those domains, via Google's `hd` claim. A personal gmail.com account has no `hd` and is refused. |
+| `BERNARD_ADMIN_EMAILS` | Exact addresses allowed to approve. Everyone else who signs in can submit only. |
 | `BERNARD_PUBLIC_URL` | External origin. An `https://` value makes the session cookie `Secure`. |
 | `BERNARD_DISPLAY_RELOAD_HOUR` | Hour the TV page reloads itself. `-1` disables. |
 

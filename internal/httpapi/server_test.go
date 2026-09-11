@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -336,5 +338,48 @@ func TestClientIPHonoursTrustProxy(t *testing.T) {
 	req.Header.Del("X-Forwarded-For")
 	if got := h.server.clientIP(req); got != "10.0.0.5" {
 		t.Errorf("no header: got %q, want 10.0.0.5", got)
+	}
+}
+
+// The SSE stream must open with enough bytes to clear a proxy's write buffer,
+// and must still be parseable — the padding is a comment line, which every SSE
+// client ignores.
+func TestEventStreamOpensPastProxyBuffering(t *testing.T) {
+	h := newHarness(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		h.server.ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	// Give the handler a moment to write its preamble, then close the stream.
+	time.Sleep(150 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := rec.Body.String()
+	if got := len(body); got < 2048 {
+		t.Errorf("stream opened with %d bytes, want >= 2048 to clear a proxy buffer", got)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("content-type %q, want text/event-stream", ct)
+	}
+	if !strings.Contains(body, "retry: 2000") {
+		t.Error("stream is missing the reconnect hint")
+	}
+	if !strings.Contains(body, "event: hello") {
+		t.Error("stream is missing the hello event")
+	}
+	// Every padding line must be a comment, or clients would try to parse it.
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "padding") && !strings.HasPrefix(line, ":") {
+			t.Errorf("padding leaked outside a comment line: %.40q", line)
+		}
 	}
 }

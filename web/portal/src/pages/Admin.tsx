@@ -23,11 +23,23 @@ export default function Admin() {
 
   // The console follows the same event stream as the TV, so a decision made on
   // someone else's laptop shows up here without a refresh.
+  //
+  // The poll alongside it is not redundant. Some proxies buffer a streaming
+  // response instead of forwarding it — a Cloudflare quick tunnel delivers
+  // nothing at all on this endpoint — and behind one of those the console would
+  // silently stop updating. The display already had this fallback; the console
+  // needs it for the same reason. Polling every 15s costs two small JSON
+  // requests and makes the page correct behind any proxy.
   useEffect(() => {
     const es = new EventSource("/api/events");
     const onChange = () => { void load(); };
     es.addEventListener("playlist", onChange);
-    return () => es.close();
+
+    const poll = setInterval(() => { void load(); }, 15000);
+    return () => {
+      es.close();
+      clearInterval(poll);
+    };
   }, [load]);
 
   async function act<T>(fn: () => Promise<T>) {

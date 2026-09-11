@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -90,6 +91,17 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 	ch := s.hub.subscribe()
 	defer s.hub.unsubscribe(ch)
+
+	// Cloudflare (and other CDNs and reverse proxies) hold a streaming response
+	// until enough bytes accumulate to be worth forwarding. An SSE stream that
+	// opens with sixty bytes and then goes quiet never reaches that threshold,
+	// so the client sits with headers and no body — measured through a
+	// Cloudflare tunnel, nothing at all arrived for well over two minutes while
+	// the same request to the origin delivered instantly.
+	//
+	// A couple of KB of comment padding pushes the response past the buffer on
+	// the first write. Comment lines (": ...") are ignored by every SSE parser.
+	fmt.Fprint(w, ": "+strings.Repeat("padding", 300)+"\n\n")
 
 	// Tell the browser to wait 2s before reconnecting after a drop.
 	fmt.Fprint(w, "retry: 2000\n\n")
